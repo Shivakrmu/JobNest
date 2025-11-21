@@ -6,6 +6,12 @@ const userSchema = new mongoose.Schema({
     default: null,
     index: true,
   },
+  googleId: {
+    type: String,
+    default: null,
+    index: true,
+    sparse: true,
+  },
   name: {
     type: String,
     required: true,
@@ -13,8 +19,13 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     default: null,
+    index: true,
   },
   password: {
+    type: String,
+    default: null,
+  },
+  picture: {
     type: String,
     default: null,
   },
@@ -33,6 +44,9 @@ const userSchema = new mongoose.Schema({
 
 // Index for faster queries
 userSchema.index({ name: 1, role: 1 });
+// `email` and `googleId` already have `index: true` set on their field
+// definitions above. Removing duplicate schema-level indexes to avoid
+// Mongoose duplicate index warnings.
 
 const User = mongoose.models.User || mongoose.model('User', userSchema);
 export default User;

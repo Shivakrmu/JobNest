@@ -1,6 +1,7 @@
 import User from '../models/User.js';
 import { generateToken } from '../middleware/auth.js';
 import { generateId } from '../utils/generateId.js';
+import { verifyGoogleToken } from '../utils/googleAuth.js';
 // use global fetch provided by Node 18+
 
 export const login = async (req, res) => {
@@ -70,6 +71,89 @@ export const getSession = async (req, res) => {
 export const logout = (req, res) => {
   // Since we're using JWT, logout is handled client-side by removing the token
   res.json({ message: 'Logged out successfully' });
+};
+
+// Google OAuth authentication
+export const googleAuth = async (req, res) => {
+  try {
+    const { idToken, role } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({ error: 'Google ID token is required' });
+    }
+
+    // Verify the Google ID token
+    const googleUser = await verifyGoogleToken(idToken);
+
+    if (!googleUser.emailVerified && !googleUser.email) {
+      return res.status(400).json({ error: 'Email verification required' });
+    }
+
+    // Check if user exists by Google ID or email
+    let user = await User.findOne({ 
+      $or: [
+        { googleId: googleUser.googleId },
+        { email: googleUser.email }
+      ]
+    });
+
+    if (!user) {
+      // Create new user with Google authentication
+      // Default role to student if not provided
+      const userRole = role === 'employer' ? 'employer' : 'student';
+      
+      user = await User.create({
+        googleId: googleUser.googleId,
+        name: googleUser.name,
+        email: googleUser.email,
+        role: userRole,
+        // Store profile picture URL if available
+        picture: googleUser.picture || null,
+      });
+    } else {
+      // Update existing user with Google ID if not set
+      if (!user.googleId) {
+        user.googleId = googleUser.googleId;
+      }
+      // Update name and email if changed
+      if (user.name !== googleUser.name) {
+        user.name = googleUser.name;
+      }
+      if (user.email !== googleUser.email) {
+        user.email = googleUser.email;
+      }
+      if (googleUser.picture && !user.picture) {
+        user.picture = googleUser.picture;
+      }
+      await user.save();
+    }
+
+    // Generate JWT token
+    const token = generateToken({
+      id: user._id.toString(),
+      name: user.name,
+      role: user.role,
+      email: user.email,
+    });
+
+    res.json({
+      user: {
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        companyId: user.companyId,
+        picture: user.picture || null,
+      },
+      token,
+    });
+  } catch (error) {
+    console.error('Google auth error:', error);
+    res.status(500).json({ 
+      error: 'Google authentication failed', 
+      message: error.message 
+    });
+  }
 };
 
 // Verify Supabase access token by calling Supabase auth user endpoint

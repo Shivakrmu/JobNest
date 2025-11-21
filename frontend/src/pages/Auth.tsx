@@ -11,6 +11,26 @@ import { toast } from "sonner";
 import { Briefcase, GraduationCap, LogIn } from "lucide-react";
 import { FcGoogle } from "react-icons/fc";
 
+// Declare Google types
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: any) => void;
+          prompt: () => void;
+          renderButton: (element: HTMLElement, config: any) => void;
+        };
+        oauth2: {
+          initTokenClient: (config: any) => {
+            requestAccessToken: () => void;
+          };
+        };
+      };
+    };
+  }
+}
+
 const Auth = () => {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
@@ -18,6 +38,7 @@ const Auth = () => {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [selectedRole, setSelectedRole] = useState<"student" | "recruiter">("student");
+  const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,6 +112,110 @@ const Auth = () => {
     }
   };
 
+  // Load and initialize Google Identity Services
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+
+    const loadGoogleScript = () => {
+      // Check if already loaded
+      if (window.google) {
+        initializeGoogleAuth();
+        return;
+      }
+
+      // Check if script is already in DOM
+      if (document.querySelector('script[src="https://accounts.google.com/gsi/client"]')) {
+        // Wait for it to load
+        const checkInterval = setInterval(() => {
+          if (window.google) {
+            clearInterval(checkInterval);
+            initializeGoogleAuth();
+          }
+        }, 100);
+        return;
+      }
+
+      // Load script
+      const script = document.createElement('script');
+      script.src = 'https://accounts.google.com/gsi/client';
+      script.async = true;
+      script.defer = true;
+      script.onload = initializeGoogleAuth;
+      document.head.appendChild(script);
+    };
+
+    const initializeGoogleAuth = () => {
+      if (!window.google) return;
+
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleCallback,
+      });
+    };
+
+    loadGoogleScript();
+  }, [GOOGLE_CLIENT_ID]);
+
+  // Handle Google Sign-In callback with ID token
+  const handleGoogleCallback = async (response: any) => {
+    try {
+      setIsLoading(true);
+      
+      // response.credential contains the ID token
+      const idToken = response.credential;
+
+      // Send ID token to backend for verification
+      const apiResponse = await api.post('/auth/google', {
+        idToken,
+        role: selectedRole === 'recruiter' ? 'employer' : 'student',
+      });
+
+      if (apiResponse.token) {
+        localStorage.setItem('backend_token', apiResponse.token);
+        localStorage.setItem('user', JSON.stringify(apiResponse.user));
+        
+        toast.success('Signed in with Google successfully!');
+        navigate(apiResponse.user.role === 'employer' ? '/recruiter/dashboard' : '/student/dashboard');
+      }
+    } catch (error: any) {
+      console.error('Google sign-in error:', error);
+      toast.error(error?.data?.error || error?.message || 'Failed to sign in with Google');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Google Sign-In button click
+  const handleGoogleSignIn = () => {
+    if (!GOOGLE_CLIENT_ID) {
+      toast.error('Google OAuth is not configured. Please set VITE_GOOGLE_CLIENT_ID');
+      return;
+    }
+
+    if (!window.google) {
+      toast.error('Google Identity Services is still loading. Please try again in a moment.');
+      return;
+    }
+
+    try {
+      // Trigger One Tap sign-in prompt
+      // This will show a popup for the user to sign in with Google
+      window.google.accounts.id.prompt((notification: any) => {
+        // If One Tap is not displayed (e.g., user dismissed it before), 
+        // we can show a message or try alternative flow
+        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+          // One Tap was not shown, but the user can still sign in
+          // The prompt might appear on next attempt
+          console.log('One Tap not displayed:', notification.getNotDisplayedReason());
+        }
+      });
+    } catch (error: any) {
+      console.error('Google OAuth error:', error);
+      toast.error('Failed to initialize Google Sign-In');
+    }
+  };
+
+  // Legacy Supabase OAuth handler (keeping for backward compatibility)
   const handleOAuthSignIn = async (provider: 'google') => {
     try {
       setIsLoading(true);
@@ -184,8 +309,14 @@ const Auth = () => {
                 </Button>
 
                 <div className="pt-2">
-                  <Button type="button" variant="outline" className="w-full flex items-center justify-center gap-2" onClick={() => handleOAuthSignIn('google')}>
-                    <LogIn className="h-5 w-5" /> Continue with Google
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    className="w-full flex items-center justify-center gap-2" 
+                    onClick={handleGoogleSignIn}
+                    disabled={isLoading || !GOOGLE_CLIENT_ID}
+                  >
+                    <FcGoogle className="h-5 w-5" /> Continue with Google
                   </Button>
                 </div>
               </form>
@@ -255,7 +386,13 @@ const Auth = () => {
                 </Button>
 
                 <div className="pt-2">
-                  <Button type="button" variant="outline" className="w-full flex items-center justify-center gap-2" onClick={() => handleOAuthSignIn('google')}>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    className="w-full flex items-center justify-center gap-2" 
+                    onClick={handleGoogleSignIn}
+                    disabled={isLoading || !GOOGLE_CLIENT_ID}
+                  >
                     <FcGoogle className="h-5 w-5" /> Continue with Google
                   </Button>
                 </div>
