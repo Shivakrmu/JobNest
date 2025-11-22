@@ -8,10 +8,45 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
-  }
-});
+function isValidHttpUrl(value: unknown) {
+  return typeof value === 'string' && /^(https?:)\/\//i.test(value);
+}
+
+if (!isValidHttpUrl(SUPABASE_URL) || !SUPABASE_PUBLISHABLE_KEY) {
+  // Provide a helpful console error instead of letting the Supabase SDK throw
+  // a confusing runtime error in the browser. This indicates the Vite env
+  // variables were not set at build time (or are malformed).
+  console.error('Supabase configuration error: VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY is missing or invalid.', {
+    VITE_SUPABASE_URL: SUPABASE_URL,
+    VITE_SUPABASE_PUBLISHABLE_KEY: SUPABASE_PUBLISHABLE_KEY ? '***REDACTED***' : null,
+  });
+
+  // Export a lightweight stub that throws when used — this keeps the app alive
+  // and surfaces a clearer error when code attempts to call Supabase methods.
+  const makeThrow = (name: string) => (..._args: any[]) => {
+    throw new Error(`Supabase not configured: ${name} called but VITE_SUPABASE_URL or publishable key is missing. Set these in your build environment.`);
+  };
+
+  // `any` is used here to avoid complex typing for the stub.
+  export const supabase: any = {
+    auth: {
+      getSession: makeThrow('auth.getSession'),
+      signOut: makeThrow('auth.signOut'),
+      signInWithPassword: makeThrow('auth.signInWithPassword'),
+      signUp: makeThrow('auth.signUp'),
+      signInWithOAuth: makeThrow('auth.signInWithOAuth'),
+    },
+    from: () => ({ select: makeThrow('from(...).select') }),
+    // Fallback generic handler
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    rpc: makeThrow('rpc') as any,
+  };
+} else {
+  export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: {
+      storage: localStorage,
+      persistSession: true,
+      autoRefreshToken: true,
+    }
+  });
+}
